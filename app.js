@@ -18,6 +18,7 @@ const countEl = document.getElementById('count');
 const filterEl = document.getElementById('filter');
 const toastEl = document.getElementById('toast');
 
+const composer = document.getElementById('composer');
 const tabButtons = document.querySelectorAll('.tab');
 const panelRecords = document.getElementById('panel-records');
 const panelSheet = document.getElementById('panel-sheet');
@@ -30,6 +31,7 @@ const sheetLoadBtn = document.getElementById('sheet-load-btn');
 const sheetChangeBtn = document.getElementById('sheet-change-btn');
 const sheetRoster = document.getElementById('sheet-roster');
 const sheetNoteEl = document.getElementById('sheet-note');
+const sheetMetaEl = document.getElementById('sheet-meta');
 const sheetSummaryEl = document.getElementById('sheet-summary');
 const sheetRowsEl = document.getElementById('sheet-rows');
 const sheetEmptyEl = document.getElementById('sheet-empty');
@@ -169,6 +171,24 @@ function cell(text, label) {
   return td;
 }
 
+// Two letters for the round avatar next to a student's name.
+function initials(name) {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  const letters = parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : (parts[0] || '?').slice(0, 2);
+  return letters.toUpperCase();
+}
+
+function whoCell(name, label) {
+  const td = document.createElement('td');
+  if (label) td.dataset.label = label;
+  const wrap = Object.assign(document.createElement('div'), { className: 'who' });
+  const avatar = Object.assign(document.createElement('span'), { className: 'avatar', textContent: initials(name) });
+  avatar.setAttribute('aria-hidden', 'true');
+  wrap.append(avatar, Object.assign(document.createElement('span'), { className: 'who-name', textContent: name }));
+  td.append(wrap);
+  return td;
+}
+
 function renderRows() {
   const q = filterEl.value.trim().toLowerCase();
   let visible = q
@@ -188,7 +208,7 @@ function renderRows() {
     const tr = document.createElement('tr');
     if (r._id === editingId) tr.className = 'editing';
 
-    tr.append(cell(formatDay(r.date), 'Date'), cell(r.studentName, 'Student'), cell(r.subjectName, 'Subject'), cell(r.section, 'Section'));
+    tr.append(cell(formatDay(r.date), 'Date'), whoCell(r.studentName, 'Student'), cell(r.subjectName, 'Subject'), cell(r.section, 'Section'));
 
     const statusTd = document.createElement('td');
     const badge = document.createElement('span');
@@ -249,6 +269,7 @@ function resetForm() {
   formTitle.textContent = 'Add attendance record';
   submitBtn.textContent = 'Add record';
   cancelBtn.hidden = true;
+  composer.classList.remove('is-editing');
   renderRows();
 }
 
@@ -264,6 +285,7 @@ function startEdit(id) {
   formTitle.textContent = 'Edit attendance record';
   submitBtn.textContent = 'Save changes';
   cancelBtn.hidden = false;
+  composer.classList.add('is-editing');
   renderRows();
   form.scrollIntoView({ behavior: 'smooth', block: 'start' });
   document.getElementById('studentName').focus();
@@ -419,7 +441,7 @@ function renderSheet() {
 
   sheet.rows.forEach((row, i) => {
     const tr = document.createElement('tr');
-    tr.append(cell(String(i + 1)), cell(row.studentName));
+    tr.append(cell(String(i + 1)), whoCell(row.studentName));
     tr.children[0].className = 'num';
 
     const statusTd = document.createElement('td');
@@ -458,11 +480,11 @@ function renderSheet() {
   sheetSaveBtn.disabled = sheet.rows.length === 0;
   sheetAllPresent.disabled = sheet.rows.length === 0;
 
-  sheetNoteEl.textContent =
-    `${sheet.subject} \u00b7 ${sheet.section} \u00b7 ${formatDay(sheet.date)}. ` +
-    (sheet.alreadySaved
-      ? `${sheet.alreadySaved} student(s) already have a record for this date and subject; saving updates them.`
-      : 'No records for this date and subject yet.');
+  sheetMetaEl.replaceChildren(...[sheet.subject, sheet.section, formatDay(sheet.date)].map((text) =>
+    Object.assign(document.createElement('span'), { className: 'chip', textContent: text })));
+  sheetNoteEl.textContent = sheet.alreadySaved
+    ? `${sheet.alreadySaved} student(s) already have a record for this date and subject; saving updates them.`
+    : 'No records for this date and subject yet.';
   renderSummary();
 }
 
@@ -590,7 +612,7 @@ const repDate = document.getElementById('rep-date');
 const repBars = document.getElementById('rep-bars');
 const repDonut = document.getElementById('rep-donut');
 const repLegend = document.getElementById('rep-legend');
-const themeBtn = document.getElementById('theme-btn');
+const themeBtns = document.querySelectorAll('[data-theme-toggle]');
 let sort = { key: null, dir: 1 };
 let repDateTouched = false;
 
@@ -619,18 +641,43 @@ function skelRow() {
   return tr;
 }
 
-function renderTiles(list) {
-  tilesEl.replaceChildren();
-  for (const s of ['Total', ...STATUSES]) {
-    const tile = document.createElement('div');
-    tile.className = `tile ${s}`;
-    const num = document.createElement('b');
-    num.textContent = s === 'Total' ? list.length : list.filter((r) => r.status === s).length;
-    const label = document.createElement('span');
-    label.textContent = s;
-    tile.append(num, label);
-    tilesEl.append(tile);
+// 100 squares, each one percent of the records shown (rounded so they always add up to 100).
+function waffleCells(counts, total) {
+  if (!total) return Array(100).fill('');
+  const parts = STATUSES.map((s) => ({ s, exact: (counts[s] / total) * 100 }));
+  parts.forEach((p) => { p.n = Math.floor(p.exact); });
+  let left = 100 - parts.reduce((sum, p) => sum + p.n, 0);
+  for (const p of parts.slice().sort((a, b) => (b.exact - b.n) - (a.exact - a.n))) {
+    if (left > 0 && p.exact > p.n) { p.n += 1; left -= 1; }
   }
+  const cells = parts.flatMap((p) => Array(p.n).fill(p.s));
+  while (cells.length < 100) cells.push('');
+  return cells;
+}
+
+function renderTiles(list) {
+  const total = list.length;
+  const counts = Object.fromEntries(STATUSES.map((s) => [s, list.filter((r) => r.status === s).length]));
+
+  const waffle = document.createElement('div');
+  waffle.className = 'waffle';
+  waffle.setAttribute('aria-hidden', 'true');
+  for (const status of waffleCells(counts, total)) {
+    waffle.append(Object.assign(document.createElement('i'), { className: status }));
+  }
+
+  const stats = document.createElement('dl');
+  stats.className = 'stats';
+  for (const s of ['Total', ...STATUSES]) {
+    const n = s === 'Total' ? total : counts[s];
+    const item = Object.assign(document.createElement('div'), { className: `stat ${s === 'Total' ? 'total' : s}` });
+    const dd = Object.assign(document.createElement('dd'), { textContent: String(n) });
+    if (s !== 'Total' && total) dd.append(Object.assign(document.createElement('small'), { textContent: `${Math.round((n / total) * 100)}%` }));
+    item.append(Object.assign(document.createElement('dt'), { textContent: s }), dd);
+    stats.append(item);
+  }
+
+  tilesEl.replaceChildren(waffle, stats);
 }
 
 document.querySelector('#panel-records thead').addEventListener('click', (event) => {
@@ -683,12 +730,10 @@ function renderReports() {
   const stops = [];
   for (const s of STATUSES) {
     const n = day.filter((r) => r.status === s).length;
-    stops.push(`var(--c-${s}) ${(from / day.length) * 100}% ${((from + n) / day.length) * 100}%`);
+    stops.push(`var(--f-${s}) ${(from / day.length) * 100}% ${((from + n) / day.length) * 100}%`);
     from += n;
     const li = document.createElement('li');
-    const dot = document.createElement('i');
-    dot.style.setProperty('--tc', `var(--c-${s})`);
-    li.append(dot, `${s}: ${n}`);
+    li.append(Object.assign(document.createElement('i'), { className: s }), `${s}: ${n}`);
     repLegend.append(li);
   }
   repDonut.style.background = day.length ? `conic-gradient(${stops.join(',')})` : '';
@@ -701,18 +746,45 @@ repDate.addEventListener('input', () => { repDateTouched = true; renderReports()
 
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
-  themeBtn.textContent = t === 'dark' ? 'Light mode' : 'Dark mode';
-  themeBtn.setAttribute('aria-label', t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+  for (const btn of themeBtns) {
+    btn.querySelector('.lbl').textContent = t === 'dark' ? 'Light mode' : 'Dark mode';
+    btn.setAttribute('aria-label', t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+  }
 }
-themeBtn.addEventListener('click', () => {
-  const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  try { localStorage.setItem('theme', t); } catch { /* private mode: the choice just won't persist */ }
-  applyTheme(t);
-});
+for (const btn of themeBtns) {
+  btn.addEventListener('click', () => {
+    const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem('theme', t); } catch { /* private mode: the choice just won't persist */ }
+    applyTheme(t);
+  });
+}
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
   try { if (localStorage.getItem('theme')) return; } catch { /* ignore */ }
   applyTheme(e.matches ? 'dark' : 'light');
 });
 applyTheme(document.documentElement.dataset.theme || 'light');
+
+// The login picture: a check mark drawn with attendance squares
+// (P present, L late, A absent, E excused, . empty).
+const MOSAIC = [
+  '..L.....AP',
+  'E.....A.PP',
+  '...L..PP.A',
+  'P.A...PP.E',
+  'PP...PP..L',
+  '.PP.PP.E..',
+  '.APPP...L.',
+  'L..P.A....',
+];
+function buildMosaic() {
+  const el = document.getElementById('mosaic');
+  const names = { P: 'Present', L: 'Late', A: 'Absent', E: 'Excused' };
+  MOSAIC.forEach((row, r) => [...row].forEach((ch, c) => {
+    const square = Object.assign(document.createElement('i'), { className: names[ch] || '' });
+    square.style.setProperty('--d', String(c + r * 0.4));
+    el.append(square);
+  }));
+}
+buildMosaic();
 
 init();

@@ -6,6 +6,7 @@ Static HTML/CSS/JS frontend + Vercel serverless API (`/api`) + MongoDB Atlas.
 
 ```
 index.html, style.css, app.js     frontend (fetch() calls to /api)
+fonts/                            Bricolage Grotesque (self-hosted .woff2) and its licence
 api/attendance/index.js           GET (list), POST (create)
 api/attendance/[id].js            PUT / PATCH (update), DELETE
 api/attendance/bulk.js            POST (save a whole class sheet)
@@ -43,6 +44,28 @@ student's status, add new names (one per line), and press **Save sheet**.
 
 Saving matches students by name, subject and date (ignoring capitals and extra spaces), so
 saving the same sheet again updates the existing records instead of creating duplicates.
+
+## Look and feel
+
+The design is built around the four attendance statuses. Each one always has the same colour
+and the same symbol, so nothing depends on colour alone:
+
+| Status | Colour | Symbol |
+|---|---|---|
+| Present | green | check mark |
+| Absent | red (hatched in charts) | cross |
+| Late | amber | clock |
+| Excused | blue (outlined in charts) | note |
+
+- The totals at the top of **Records** are drawn as a 100-square waffle chart. Each square is
+  1% of the records shown, so the chart follows the filter box.
+- The login screen's mosaic is made of the same status squares.
+- Light and dark themes. The choice is remembered in the browser; the first visit follows the
+  system setting.
+- On tablets and phones the sidebar becomes a top bar with a bottom tab bar, and each record
+  becomes a card instead of a table row.
+- The font is Bricolage Grotesque, hosted in `fonts/` (SIL Open Font License 1.1, see
+  `fonts/OFL-LICENSE.txt`), so the page does not call any external font server.
 
 ## Run locally (optional)
 
